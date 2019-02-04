@@ -100,6 +100,7 @@ class MeshGeneratorWidget(QtGui.QWidget):
         self._ui.timeLoop_checkBox.clicked.connect(self._timeLoopClicked)
         self._ui.strain_reference_button.clicked.connect(self._set_strain_reference)
         self._ui.viewVideo_button.clicked.connect(self._playVideo)
+        self._ui.view_mesh_button.clicked.connect(self._renderECGMesh)
 
     def _createFMAItem(self, parent, text, fma_id):
         item = QtGui.QTreeWidgetItem(parent)

@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'strainwidget.ui'
 #
-# Created: Mon Feb  4 17:09:27 2019
+# Created: Mon Feb  4 17:25:59 2019
 #      by: pyside-uic 0.2.15 running on PySide 1.2.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -98,9 +98,9 @@ class Ui_MeshGeneratorWidget(object):
         self.label_4 = QtGui.QLabel(self.groupBox_2)
         self.label_4.setGeometry(QtCore.QRect(30, 70, 55, 16))
         self.label_4.setObjectName("label_4")
-        self.pushButton_3 = QtGui.QPushButton(self.groupBox_2)
-        self.pushButton_3.setGeometry(QtCore.QRect(60, 170, 201, 24))
-        self.pushButton_3.setObjectName("pushButton_3")
+        self.view_mesh_button = QtGui.QPushButton(self.groupBox_2)
+        self.view_mesh_button.setGeometry(QtCore.QRect(130, 170, 201, 24))
+        self.view_mesh_button.setObjectName("view_mesh_button")
         self.viewVideo_button = QtGui.QPushButton(self.groupBox_2)
         self.viewVideo_button.setGeometry(QtCore.QRect(60, 90, 111, 21))
         self.viewVideo_button.setObjectName("viewVideo_button")
@@ -189,7 +189,7 @@ class Ui_MeshGeneratorWidget(object):
         self.groupBox_2.setTitle(QtGui.QApplication.translate("MeshGeneratorWidget", "Adjust Data", None, QtGui.QApplication.UnicodeUTF8))
         self.label_3.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "+2s", None, QtGui.QApplication.UnicodeUTF8))
         self.label_4.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "-2s", None, QtGui.QApplication.UnicodeUTF8))
-        self.pushButton_3.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "View data with video", None, QtGui.QApplication.UnicodeUTF8))
+        self.view_mesh_button.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "View Mesh", None, QtGui.QApplication.UnicodeUTF8))
         self.viewVideo_button.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "View Video", None, QtGui.QApplication.UnicodeUTF8))
         self.strain_reference_button.setText(QtGui.QApplication.translate("MeshGeneratorWidget", "Set curent Frame as strain reference point", None, QtGui.QApplication.UnicodeUTF8))
         self.video_groupBox.setTitle(QtGui.QApplication.translate("MeshGeneratorWidget", "Video:", None, QtGui.QApplication.UnicodeUTF8))
