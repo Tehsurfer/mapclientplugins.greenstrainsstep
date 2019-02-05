@@ -161,17 +161,20 @@ class StrainMesh(MeshAlignmentModel):
         field_module.endChange()
         self._strain_graphics_point_attr = []
         for i, mg in enumerate(mesh_group_list):
-            strain = self.calculate_strain_in_element_xi(element_node_list[i], 0)
-            scaled_eigvectors = self.get_sized_eigvectors(strain)
-            if np.iscomplex(scaled_eigvectors).any():
+            # strain = self.calculate_strain_in_element_xi(element_node_list[i], 0)
+            # # scaled_eigvectors = self.get_sized_eigvectors(strain)
+            # e_vals, e_vecs = np.linalg.eig(strain)
+
+            e_vals, e_vecs = self.calculate_strain_in_element_xi(element_node_list[i], 0)
+            if np.iscomplex(e_vecs).any():
                 x = 0
-            self.create_display_strains(scaled_eigvectors, mg)
+            self.create_display_strains(e_vecs, e_vals, mg)
 
     def display_strains_at_given_time(self, time_step):
         fm = self._region.getFieldmodule()
         for i, mg in enumerate(self._mesh_group_list):
             strain = self.calculate_strains_on_element(self._element_node_list[i], time_step)
-            scaled_eigvectors = self.get_sized_eigvectors(strain)
+            eigvectors, eigenvalues = self.get_sized_eigvectors(strain)
             ss = fm.createFieldConstant(np.array(scaled_eigvectors).flatten().tolist())
             self._strain_graphics_point_attr[i].setOrientationScaleField(ss)
 
@@ -209,9 +212,9 @@ class StrainMesh(MeshAlignmentModel):
         sizedvectors = []
         for i, _ in enumerate(e_vals):
             sizedvectors.append(list(e_vals[i] * e_vecs[:, i]))
-        return np.vstack(sizedvectors).tolist()
+        return np.vstack(sizedvectors).tolist(), e_vals
 
-    def create_display_strains(self, strain, mesh_group):
+    def create_display_strains(self, strain_vectors, strain_values, mesh_group):
         scene = self._region.getScene()
         fm = self._region.getFieldmodule()
         fm.beginChange()
@@ -222,11 +225,15 @@ class StrainMesh(MeshAlignmentModel):
         strain_graphics.setCoordinateField(coordinates)
         strain_graphics.setSubgroupField(mesh_group)
         pointattr = strain_graphics.getGraphicspointattributes()
-        pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_DIAMOND )
+        pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_ARROW_SOLID)
+        pointattr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
 
         pointattr.setBaseSize([0.01,0.01,0.01])
-        ss = fm.createFieldConstant(np.array(strain).flatten().tolist())
+        ss = fm.createFieldConstant(np.array(strain_vectors).flatten().tolist())
         pointattr.setOrientationScaleField(ss)
+        pointattr.setScaleFactors(strain_values.tolist())
+
+
         materialModule = scene.getMaterialmodule()
         strain_graphics.setMaterial(materialModule.findMaterialByName('red'))
         strain_graphics.setName('displayStrains')
@@ -273,20 +280,34 @@ class StrainMesh(MeshAlignmentModel):
         zi = norm / np.linalg.norm(norm)
         yi = np.cross(zi, xi)
         yi = yi / np.linalg.norm(yi)
-        TT = np.vstack([xi, yi, zi]).T
+        TT = np.vstack([xi, yi, zi])
         # Transormation Matrix TM will be used to convert between coordinate systems
-        TM = np.eye(3)
-        for i in range (0,3):
-            for j in range(0,3):
-                TM[i][j] = math.cos(angle_between_vectors(np.eye(3)[:,i],TT[:,j]))
+        # https://stackoverflow.com/questions/19621069/3d-rotation-matrix-rotate-to-another-reference-system
+        TM = TT
+        # for i in range (0,3):
+        #     for j in range(0,3):
+        #         TM[i][j] = math.cos(angle_between_vectors(np.eye(3)[:,i],TT[:,j]))
 
-        E = self.calculate_strains_on_element(element, timestep)
+        # E = self.calculate_strains_on_element(element, timestep)
 
-        Exi = TM.T @ E
-        Exi[:,0] = 0
-        Exi[0,:] = 0
-        Exi = TM @ E
-        return Exi
+        points = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep], nodes[str(element[3])][timestep]]
+        points_dash = [nodes[str(element[1])][timestep + 1], nodes[str(element[2])][timestep + 1],
+                       nodes[str(element[3])][timestep + 1]]
+
+        F = np.linalg.solve(points, points_dash)
+        C = F.T @ F
+        E = .5 * (C - np.identity(3))
+
+        e_vals, e_vecs = np.linalg.eig(E)
+        e_vecs_global = np.array(TM @ e_vecs)
+        # e_vecs_global[:,2] = 0
+        e_vecs_global[2,:] = 0
+        e_vecs_global = TM.T @ e_vecs_global
+
+        e_vals_global = np.array(TM @ e_vals)
+        e_vals_global[2] = 0
+        e_vals_global = TM.T @ e_vals_global
+        return e_vals_global, e_vecs_global
 
 
     def set_strain_reference_frame(self, frame_index):
@@ -306,6 +327,14 @@ class StrainMesh(MeshAlignmentModel):
 
         materialModule = scene.getMaterialmodule()
 
+        axes = scene.createGraphicsPoints()
+        pointattr = axes.getGraphicspointattributes()
+        pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_AXES_XYZ)
+        pointattr.setBaseSize([1.0, 1.0, 1.0])
+        axes.setMaterial(materialModule.findMaterialByName('grey50'))
+        axes.setName('displayAxes')
+        axes.setVisibilityFlag(True)
+
         lines = scene.createGraphicsLines()
         lines.setCoordinateField(coordinates)
         lines.setName('displayLines2')
@@ -319,16 +348,17 @@ class StrainMesh(MeshAlignmentModel):
 
         nodePointAttr = nodePoints.getGraphicspointattributes()
         nodePointAttr.setGlyphShapeType(Glyph.SHAPE_TYPE_SPHERE)
-        nodePointAttr.setBaseSize([5, 5, 5])
-        # cmiss_number = fm.findFieldByName('cmiss_number')
-        # nodePointAttr.setLabelField(cmiss_number)
+        nodePointAttr.setBaseSize([.005, .005, .005])
+        cmiss_number = fm.findFieldByName('cmiss_number')
+        nodePointAttr.setLabelField(cmiss_number)
 
         surfaces = scene.createGraphicsSurfaces()
         surfaces.setCoordinateField(coordinates)
+        surfaces.setMaterial(materialModule.findMaterialByName('trans_blue'))
         surfaces.setVisibilityFlag(True)
 
-        colour = fm.findFieldByName('colour2')
-        colour = colour.castFiniteElement()
+        # colour = fm.findFieldByName('colour2')
+        # colour = colour.castFiniteElement()
 
         # Set attributes for our mesh
         scene.endChange()
