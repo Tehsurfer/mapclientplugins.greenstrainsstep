@@ -218,25 +218,26 @@ class StrainMesh(MeshAlignmentModel):
         scene = self._region.getScene()
         fm = self._region.getFieldmodule()
         fm.beginChange()
+        materialModule = scene.getMaterialmodule()
         coordinates = self._coordinates
         coordinates = coordinates.castFiniteElement()
-        strain_graphics = scene.createGraphicsPoints()
-        strain_graphics.setFieldDomainType(Field.DOMAIN_TYPE_MESH_HIGHEST_DIMENSION)
-        strain_graphics.setCoordinateField(coordinates)
-        strain_graphics.setSubgroupField(mesh_group)
-        pointattr = strain_graphics.getGraphicspointattributes()
-        pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_ARROW_SOLID)
-        pointattr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
+        for i in range(2):
 
-        pointattr.setBaseSize([0.01,0.01,0.01])
-        ss = fm.createFieldConstant(np.array(strain_vectors).flatten().tolist())
-        pointattr.setOrientationScaleField(ss)
-        pointattr.setScaleFactors(strain_values.tolist())
+            strain_graphics = scene.createGraphicsPoints()
+            strain_graphics.setFieldDomainType(Field.DOMAIN_TYPE_MESH_HIGHEST_DIMENSION)
+            strain_graphics.setCoordinateField(coordinates)
+            strain_graphics.setSubgroupField(mesh_group)
+            pointattr = strain_graphics.getGraphicspointattributes()
+            pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_ARROW_SOLID)
+            pointattr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
 
-
-        materialModule = scene.getMaterialmodule()
-        strain_graphics.setMaterial(materialModule.findMaterialByName('red'))
-        strain_graphics.setName('displayStrains')
+            pointattr.setBaseSize([0.00,0.005,0.005])
+            ss = fm.createFieldConstant(strain_vectors[i].tolist())
+            pointattr.setOrientationScaleField(ss)
+            pointattr.setSignedScaleField(fm.createFieldConstant(strain_values[i]))
+            strain_graphics.setMaterial(materialModule.findMaterialByName('red'))
+            pointattr.setScaleFactors([.5, 0.0, 0.0])
+        # strain_graphics.setName('displayStrains')
 
         # Create a point attribute arrray so that we can modify the size later easily
         self._strain_graphics_point_attr.append(pointattr)
@@ -280,7 +281,7 @@ class StrainMesh(MeshAlignmentModel):
         zi = norm / np.linalg.norm(norm)
         yi = np.cross(zi, xi)
         yi = yi / np.linalg.norm(yi)
-        TT = np.vstack([xi, yi, zi])
+        TT = np.vstack([xi, yi])
         # Transormation Matrix TM will be used to convert between coordinate systems
         # https://stackoverflow.com/questions/19621069/3d-rotation-matrix-rotate-to-another-reference-system
         TM = TT
@@ -298,16 +299,15 @@ class StrainMesh(MeshAlignmentModel):
         C = F.T @ F
         E = .5 * (C - np.identity(3))
 
-        e_vals, e_vecs = np.linalg.eig(E)
-        e_vecs_global = np.array(TM @ e_vecs)
-        # e_vecs_global[:,2] = 0
-        e_vecs_global[2,:] = 0
-        e_vecs_global = TM.T @ e_vecs_global
+        Exi = TM @ E @ TM.T
+        e_vals = [0,0,0]
+        e_vals[0:2], e_vecsxi = np.linalg.eig(Exi)
+        e_vecs = np.eye(3, 3)
+        e_vecs[:, 0] = TM.T @ e_vecsxi[:,0]
+        e_vecs[:, 1] = TM.T @ e_vecsxi[:,1]
+        e_vecs[:, 2] = [0,0,0]
 
-        e_vals_global = np.array(TM @ e_vals)
-        e_vals_global[2] = 0
-        e_vals_global = TM.T @ e_vals_global
-        return e_vals_global, e_vecs_global
+        return np.array(e_vals), e_vecs.T
 
 
     def set_strain_reference_frame(self, frame_index):
