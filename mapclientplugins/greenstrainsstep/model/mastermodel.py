@@ -14,7 +14,7 @@ class MasterModel(object):
         self._location = location
         self._identifier = identifier
         self._filenameStem = os.path.join(self._location, self._identifier)
-        self._context = Context("strains")
+        self._context = Context("strains_context")
         self._timekeeper = self._context.getTimekeepermodule().getDefaultTimekeeper()
         self._timer = QtCore.QTimer()
         self._current_time = 0.0

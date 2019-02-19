@@ -10,7 +10,11 @@ from opencmiss.zinc.element import Element, Elementbasis
 from opencmiss.zinc.field import Field
 from opencmiss.zinc.node import Node
 from opencmiss.zinc.glyph import Glyph
+from opencmiss.zinc.spectrum import Spectrumcomponent
+from opencmiss.zinc.graphics import Graphics
 from mapclientplugins.greenstrainsstep.model.meshalignmentmodel import MeshAlignmentModel
+from opencmiss.zinc.status import OK as ZINC_OK
+from opencmiss.zinc.streamregion import StreaminformationRegion
 
 
 class StrainMesh(MeshAlignmentModel):
@@ -23,12 +27,14 @@ class StrainMesh(MeshAlignmentModel):
         self._mesh_group = []
         self._field_element_group = None
         self._coordinates = None
+        self._frame_index = 0
 
         ecg_region = region.findChildByName('strain_mesh')
         if ecg_region.isValid():
             region.removeChild(ecg_region)
 
         self._region = region.createChild('strain_mesh')
+        self._scene = self._region.getScene()
         self._time_based_node_description = time_based_node_description
 
 
@@ -36,6 +42,7 @@ class StrainMesh(MeshAlignmentModel):
         """
         generateMesh: This is where all points, elements, and colour fields relating to them are defined
         """
+        # self.loadModel(self._region)
         coordinate_dimensions = 3
         # self.number_points = len(self._node_coordinate_list)
 
@@ -44,8 +51,15 @@ class StrainMesh(MeshAlignmentModel):
         elements_count_up = 7
         use_cross_derivatives = 0
 
+        # ctx = self._region.getContext()
+        # logger = ctx.getLogger()
+        elementsCount1 = 1
+        elementsCount2 = 1
+        elementsCount3 = 1
+
         # Set up our coordinate field
         field_module = self._region.getFieldmodule()
+        fm = field_module
         field_module.beginChange()
         coordinates = field_module.createFieldFiniteElement(coordinate_dimensions)
         coordinates.setName('coordinates')
@@ -57,191 +71,229 @@ class StrainMesh(MeshAlignmentModel):
         if coordinate_dimensions == 3:
             coordinates.setComponentName(3, 'z')
 
-        # Set up our node template
-        nodes = field_module.findNodesetByFieldDomainType(Field.DOMAIN_TYPE_NODES)
-        node_template = nodes.createNodetemplate()
-        node_template.defineField(coordinates)
-        node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_VALUE, 1)
-        node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS1, 1)
-        node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS2, 1)
-        if use_cross_derivatives:
-            node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D2_DS1DS2, 1)
+        nodes = fm.findNodesetByFieldDomainType(Field.DOMAIN_TYPE_NODES)
+        nodetemplate = nodes.createNodetemplate()
+        nodetemplate.defineField(coordinates)
+        nodetemplate.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_VALUE, 1)
+        nodetemplate.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS1, 1)
+        nodetemplate.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS2, 1)
 
-        mesh = field_module.findMeshByDimension(2)
+        nodetemplate.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS3, 1)
 
-        # Create our mesh subgroup
-        fieldGroup = field_module.createFieldGroup()
-        fieldElementGroup = fieldGroup.createFieldElementGroup(mesh)
-        fieldElementGroup.setManaged(True)
-        meshGroup = fieldElementGroup.getMeshGroup()
 
-        # Define our interpolation
-        bicubicHermiteBasis = field_module.createElementbasis(2, Elementbasis.FUNCTION_TYPE_CUBIC_HERMITE)
-        bilinearBasis = field_module.createElementbasis(2, Elementbasis.FUNCTION_TYPE_LINEAR_LAGRANGE)
+        mesh = fm.findMeshByDimension(3)
+        from scaffoldmaker.utils.eftfactory_tricubichermite import eftfactory_tricubichermite
+        tricubichermite = eftfactory_tricubichermite(mesh, 0)
+        eft = tricubichermite.createEftBasic()
 
-        # Set up our element templates
-        eft = meshGroup.createElementfieldtemplate(bicubicHermiteBasis)
-        eft_bi_linear = meshGroup.createElementfieldtemplate(bilinearBasis)
-        if not use_cross_derivatives:
-            for n in range(4):
-                eft.setFunctionNumberOfTerms(n*4 + 4, 0)
-        element_template = meshGroup.createElementtemplate()
-        element_template.setElementShapeType(Element.SHAPE_TYPE_SQUARE)
-        element_template.defineField(coordinates, -1, eft)
+        elementtemplate = mesh.createElementtemplate()
+        elementtemplate.setElementShapeType(Element.SHAPE_TYPE_CUBE)
+        result = elementtemplate.defineField(coordinates, -1, eft)
 
-        # Create our spectrum colour field
-        colour = field_module.createFieldFiniteElement(1)
-        colour.setName('colour2')
-        colour.setManaged(True)
+        cache = fm.createFieldcache()
 
-        # add time support for colour field
-
-        # Create node and element templates for our spectrum colour field
-        node_template.defineField(colour)
-        node_template.setValueNumberOfVersions(colour, -1, Node.VALUE_LABEL_VALUE, 1)
-        element_template.defineField(colour, -1, eft_bi_linear)
-
-        node_time_sequence = self._time_based_node_description['time_array']
+        # create nodes
+        nodeIdentifier = 1
+        x = [0.0, 0.0, 0.0]
+        x1 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0],
+              [0.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+        x2 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.5], [1.0, 2.0, 0.5], [0.0, 0.5, 1.0], [1.0, 0.5, 1.0],
+              [0.0, 2.5, 1.5], [1.0, 2.5, 1.5]]
+        points = []
+        dx_ds1 = [1.0 / elementsCount1, 0.0, 0.0]
+        dx_ds2 = [0.0, 1.0 / elementsCount2, 0.0]
+        dx_ds3 = [0.0, 0.0, 1.0 / elementsCount3]
+        zero = [0.0, 0.0, 0.0]
+        node_time_sequence = [0,2]
         zinc_node_time_sequence = field_module.getMatchingTimesequence(node_time_sequence)
-        node_template.setTimesequence(coordinates, zinc_node_time_sequence)
+        nodetemplate.setTimesequence(coordinates, zinc_node_time_sequence)
 
         first_node_number = 0
 
         # create nodes
-        cache = field_module.createFieldcache()
-        node_identifier = first_node_number
+        nodeIdentifier = 1
+        x = [0.0, 0.0, 0.0]
+        x1 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0],
+              [0.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+        F = np.array([[1,.5,-1],
+             [.5,1,0],
+             [0,0,2]])
+
+        x2 = (np.array(x1) @ F).tolist()
+        # x2 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.5], [1.0, 2.0, 0.5], [0.0, 0.5, 1.0], [1.0, 0.5, 1.0],
+        #       [0.0, 2.5, 1.5], [1.0, 2.5, 1.5]]
+        points = []
+        dx_ds1 = [1.0 / elementsCount1, 0.0, 0.0]
+        dx_ds2 = [0.0, 1.0 / elementsCount2, 0.0]
+        dx_ds3 = [0.0, 0.0, 1.0 / elementsCount3]
         zero = [0.0, 0.0, 0.0]
-        i = 0
-        for n2 in range(elements_count_up + 1):
-            for n1 in range(elements_count_across + 1):
 
-                node = nodes.createNode(node_identifier, node_template)
-                cache.setNode(node)
+        cache = field_module.createFieldcache()
+        nodeIdentifier = 1
+        for i, xp in enumerate(x1):
+            node = nodes.createNode(nodeIdentifier, nodetemplate)
+            cache.setTime(0)
+            cache.setNode(node)
+            coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_VALUE, 1, xp)
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS1, 1, dx_ds1)
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS2, 1, dx_ds2)
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS3, 1, dx_ds3)
+            # if useCrossDerivatives:
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS2, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS3, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS2DS3, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D3_DS1DS2DS3, 1, zero)
 
-                node_locations = self._time_based_node_description['{0}'.format(node_identifier)]
-                # Assign the new node its position
-                for index, time in enumerate(node_time_sequence):
-                    cache.setTime(time)
-                    coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_VALUE, 1, node_locations[index])
-                # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS1, 1, dx_ds1)
-                # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS2, 1, dx_ds2)
-                if use_cross_derivatives:
-                    coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS2, 1, zero)
-
-                node_identifier = node_identifier + 1
-                i += 1
-
+            cache.setTime(2)
+            cache.setNode(node)
+            coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_VALUE, 1, x2[i])
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS1, 1, dx_ds1)
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS2, 1, dx_ds2)
+            # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS3, 1, dx_ds3)
+            # if useCrossDerivatives:
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS2, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS3, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS2DS3, 1, zero)
+            #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D3_DS1DS2DS3, 1, zero)
+            nodeIdentifier = nodeIdentifier + 1
+            self.node = node
         # create elements
-        element_node_list = []
-        elementIdentifier = first_node_number
-        mesh_group_list = []
-        no2 = (elements_count_across + 1)
-        for e2 in range(elements_count_up):
-            for e1 in range(elements_count_across):
-                element_node_list.append([])
-                element = meshGroup.createElement(elementIdentifier, element_template)
-                bni = e2 * no2 + e1 + first_node_number
-                nodeIdentifiers = [bni, bni + 1, bni + no2, bni + no2 + 1]
-                element_node_list[e1+e2*elements_count_across] = nodeIdentifiers
-                result = element.setNodesByIdentifier(eft, nodeIdentifiers)
-                result = element.setNodesByIdentifier(eft_bi_linear, nodeIdentifiers)
-                elementIdentifier = elementIdentifier + 1
-                element_group = field_module.createFieldElementGroup(mesh)
-                temp_mesh_group = element_group.getMeshGroup()
-                temp_mesh_group.addElement(element)
-                mesh_group_list.append(element_group)
+        elementIdentifier = 1
+        no2 = (elementsCount1 + 1)
+        no3 = (elementsCount2 + 1) * no2
+        for e3 in range(elementsCount3):
+            for e2 in range(elementsCount2):
+                for e1 in range(elementsCount1):
+                    element = mesh.createElement(elementIdentifier, elementtemplate)
+                    bni = e3 * no3 + e2 * no2 + e1 + 1
+                    nodeIdentifiers = [bni, bni + 1, bni + no2, bni + no2 + 1, bni + no3, bni + no3 + 1,
+                                       bni + no2 + no3, bni + no2 + no3 + 1]
+                    result = element.setNodesByIdentifier(eft, nodeIdentifiers)
+                    elementIdentifier = elementIdentifier + 1
+
+        fm.endChange()
+        # Set up our node template
+        # nodes = field_module.findNodesetByFieldDomainType(Field.DOMAIN_TYPE_NODES)
+        # node_template = nodes.createNodetemplate()
+        # node_template.defineField(coordinates)
+        # node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_VALUE, 1)
+        # node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS1, 1)
+        # node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS2, 1)
+        # node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D_DS3, 1)
+        # if use_cross_derivatives:
+        #     node_template.setValueNumberOfVersions(coordinates, -1, Node.VALUE_LABEL_D2_DS1DS2, 1)
+        #
+        # mesh = field_module.findMeshByDimension(3)
+        # # mesh = mesh.getMasterMesh()
+        # # Create our mesh subgroup
+        # # fieldGroup = field_module.createFieldGroup()
+        # # fieldElementGroup = fieldGroup.createFieldElementGroup(mesh)
+        # # fieldElementGroup.setManaged(True)
+        # # meshGroup = fieldElementGroup.getMeshGroup()
+        #
+        # # Define our interpolation
+        # bicubicHermiteBasis = field_module.createElementbasis(3, Elementbasis.FUNCTION_TYPE_CUBIC_HERMITE)
+        # # bilinearBasis = field_module.createElementbasis(2, Elementbasis.FUNCTION_TYPE_LINEAR_LAGRANGE)
+        #
+        # # Set up our element templates
+        # eft = mesh.createElementfieldtemplate(bicubicHermiteBasis)
+        # # eft_bi_linear = mesh.createElementfieldtemplate(bilinearBasis)
+        # # if not use_cross_derivatives:
+        # #     for n in range(4):
+        # #         eft.setFunctionNumberOfTerms(n*4 + 4, 0)
+        # element_template = mesh.createElementtemplate()
+        # element_template.setElementShapeType(Element.SHAPE_TYPE_CUBE)
+        # element_template.defineField(coordinates, -1, eft)
+        #
+        # # Create our spectrum colour field
+        # # colour = field_module.createFieldFiniteElement(1)
+        # #         # colour.setName('colour2')
+        # #         # colour.setManaged(True)
+        #
+        # # add time support for colour field
+        #
+        # # Create node and element templates for our spectrum colour field
+        # # node_template.defineField(colour)
+        # # node_template.setValueNumberOfVersions(colour, -1, Node.VALUE_LABEL_VALUE, 1)
+        # # element_template.defineField(colour, -1, eft_bi_linear)
+        #
+        # node_time_sequence = [0,2]
+        # zinc_node_time_sequence = field_module.getMatchingTimesequence(node_time_sequence)
+        # node_template.setTimesequence(coordinates, zinc_node_time_sequence)
+        #
+        # first_node_number = 0
+        # elementsCount1 = elementsCount2 = elementsCount3 = 1
+        #
+        # # create nodes
+        # nodeIdentifier = 1
+        # x = [0.0, 0.0, 0.0]
+        # x1 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0],
+        #       [0.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+        # x2 = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.5], [1.0, 2.0, 0.5], [0.0, 0.5, 1.0], [1.0, 0.5, 1.0],
+        #       [0.0, 2.5, 1.5], [1.0, 2.5, 1.5]]
+        # points = []
+        # dx_ds1 = [1.0 / elementsCount1, 0.0, 0.0]
+        # dx_ds2 = [0.0, 1.0 / elementsCount2, 0.0]
+        # dx_ds3 = [0.0, 0.0, 1.0 / elementsCount3]
+        # zero = [0.0, 0.0, 0.0]
+        #
+        # cache = field_module.createFieldcache()
+        # nodeIdentifier = 1
+        # for i, xp in enumerate(x1):
+        #     node = nodes.createNode(nodeIdentifier, node_template)
+        #     cache.setTime(0)
+        #     cache.setNode(node)
+        #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_VALUE, 1, xp)
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS1, 1, dx_ds1)
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS2, 1, dx_ds2)
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS3, 1, dx_ds3)
+        #     # if useCrossDerivatives:
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS2, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS3, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS2DS3, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D3_DS1DS2DS3, 1, zero)
+        #
+        #     cache.setTime(2)
+        #     cache.setNode(node)
+        #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_VALUE, 1, x2[i])
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS1, 1, dx_ds1)
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS2, 1, dx_ds2)
+        #     # coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D_DS3, 1, dx_ds3)
+        #     # if useCrossDerivatives:
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS2, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS1DS3, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D2_DS2DS3, 1, zero)
+        #     #     coordinates.setNodeParameters(cache, -1, Node.VALUE_LABEL_D3_DS1DS2DS3, 1, zero)
+        #     nodeIdentifier = nodeIdentifier + 1
+        #     self.node = node
+        #
+        #
+        # # create elements
+        # elementIdentifier = 1
+        # no2 = (elementsCount1 + 1)
+        # no3 = (elementsCount2 + 1) * no2
+        # for e3 in range(elementsCount3):
+        #     for e2 in range(elementsCount2):
+        #         for e1 in range(elementsCount1):
+        #             element = mesh.createElement(elementIdentifier, element_template)
+        #             bni = e3 * no3 + e2 * no2 + e1 + 1
+        #             nodeIdentifiers = [bni, bni + 1, bni + no2, bni + no2 + 1, bni + no3, bni + no3 + 1,
+        #                                bni + no2 + no3, bni + no2 + no3 + 1]
+        #             result = element.setNodesByIdentifier(eft, nodeIdentifiers)
+        #             elementIdentifier = elementIdentifier + 1
+
+
 
         # Set fields for later access
-        self._mesh_group = meshGroup
-        self._mesh_group_list = mesh_group_list
-        self._element_node_list = element_node_list
-        self._field_element_group = fieldElementGroup
+        # self._mesh_group = meshGroup
+        # self._element_list = element_list
+        # self._mesh_group_list = mesh_group_list
+        # self._element_node_list = element_node_list
+        # self._field_element_group = fieldElementGroup
         self._coordinates = coordinates
-
         field_module.endChange()
         self._strain_graphics_point_attr = []
-        for i, mg in enumerate(mesh_group_list):
-            # strain = self.calculate_strain_in_element_xi(element_node_list[i], 0)
-            # # scaled_eigvectors = self.get_sized_eigvectors(strain)
-            # e_vals, e_vecs = np.linalg.eig(strain)
-
-            e_vals, e_vecs = self.calculate_strain_in_element_xi(element_node_list[i], 0)
-            if np.iscomplex(e_vecs).any():
-                x = 0
-            self.create_display_strains(e_vecs, e_vals, mg)
-
-    def display_strains_at_given_time(self, time_step):
-        fm = self._region.getFieldmodule()
-        for i, mg in enumerate(self._mesh_group_list):
-            strain = self.calculate_strains_on_element(self._element_node_list[i], time_step)
-            eigvectors, eigenvalues = self.get_sized_eigvectors(strain)
-            ss = fm.createFieldConstant(np.array(scaled_eigvectors).flatten().tolist())
-            self._strain_graphics_point_attr[i].setOrientationScaleField(ss)
-
-    def display_strains_at_given_time_to_reference(self, time_step):
-        fm = self._region.getFieldmodule()
-        for i, mg in enumerate(self._mesh_group_list):
-            strain = self.calculate_strains_from_element_reference(self._element_node_list[i], time_step)
-            scaled_eigvectors = self.get_sized_eigvectors(strain)
-            ss = fm.createFieldConstant(np.array(scaled_eigvectors).flatten().tolist())
-            self._strain_graphics_point_attr[i].setOrientationScaleField(ss)
-
-    def calculate_strains_on_element(self, element, timestep):
-
-        nodes = self._time_based_node_description
-
-        # points is the location of a line at timestep t. points_dash is the location of the line at timestep t+1
-        points = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep],nodes[str(element[3])][timestep]]
-        points_dash = [nodes[str(element[1])][timestep+1], nodes[str(element[2])][timestep+1],nodes[str(element[3])][timestep+1]]
-        strain = self.calculate_strain(points, points_dash)
-
-        return strain
-    def calculate_strains_from_element_reference(self, element, timestep):
-
-        nodes = self._time_based_node_description
-
-        # points is the location of a line at timestep t. points_dash is the location of the line at timestep t+1
-        points = [nodes[str(element[1])][self._frame_index], nodes[str(element[2])][self._frame_index],nodes[str(element[3])][self._frame_index]]
-        points_dash = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep],nodes[str(element[3])][timestep]]
-        strain = self.calculate_strain(points, points_dash)
-
-        return strain
-    def get_sized_eigvectors(self, E):
-
-        e_vals, e_vecs = np.linalg.eig(E)
-        sizedvectors = []
-        for i, _ in enumerate(e_vals):
-            sizedvectors.append(list(e_vals[i] * e_vecs[:, i]))
-        return np.vstack(sizedvectors).tolist(), e_vals
-
-    def create_display_strains(self, strain_vectors, strain_values, mesh_group):
-        scene = self._region.getScene()
-        fm = self._region.getFieldmodule()
-        fm.beginChange()
-        materialModule = scene.getMaterialmodule()
-        coordinates = self._coordinates
-        coordinates = coordinates.castFiniteElement()
-        for i in range(2):
-
-            strain_graphics = scene.createGraphicsPoints()
-            strain_graphics.setFieldDomainType(Field.DOMAIN_TYPE_MESH_HIGHEST_DIMENSION)
-            strain_graphics.setCoordinateField(coordinates)
-            strain_graphics.setSubgroupField(mesh_group)
-            pointattr = strain_graphics.getGraphicspointattributes()
-            pointattr.setGlyphShapeType(Glyph.SHAPE_TYPE_ARROW_SOLID)
-            pointattr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
-
-            pointattr.setBaseSize([0.00,0.005,0.005])
-            ss = fm.createFieldConstant(strain_vectors[i].tolist())
-            pointattr.setOrientationScaleField(ss)
-            pointattr.setSignedScaleField(fm.createFieldConstant(strain_values[i]))
-            strain_graphics.setMaterial(materialModule.findMaterialByName('red'))
-            pointattr.setScaleFactors([.5, 0.0, 0.0])
-        # strain_graphics.setName('displayStrains')
-
-        # Create a point attribute arrray so that we can modify the size later easily
-        self._strain_graphics_point_attr.append(pointattr)
-        fm.endChange()
+        self.strain_in_zinc(1)
 
     def convert_dict_to_array(self, dictionary):
         array = []
@@ -250,32 +302,121 @@ class StrainMesh(MeshAlignmentModel):
                 array.append(dictionary[key])
         return array
 
-    def create_strain_arrays(self, ecg_dict):
-        strains = []
-        for i, points_over_time in enumerate(ecg_dict[:-1]):
-            strains.append([])
-            for j, point in enumerate(points_over_time[:-1]):
-                points = [ecg_dict[i][j], ecg_dict[i + 1][j]]
-                points_dash = [ecg_dict[i][j + 1], ecg_dict[i + 1][j + 1]]
-                strains[i].append(self.calculate_strain(points, points_dash))
-        return strains
+    def strain_in_zinc(self, time):
+        fieldmodule = self._region.getFieldmodule()
+        scene = self._scene
+        coordinates = self._coordinates
+        coordinates = coordinates.castFiniteElement()
+        scene.beginChange()
+        E = fieldmodule.findFieldByName("E")
+        principal_strain_direction = []
+        principal_strain = []
+        if E.isValid():
+            for i in range(3):
+                principal_strain.append(fieldmodule.findFieldByName("principal_strain{:}".format(i + 1)))
+                principal_strain_direction.append(
+                    fieldmodule.findFieldByName("principal_strain{:}_direction".format(i + 1)))
+        else:
+            fieldmodule.beginChange()
+            reference_coordinates = fieldmodule.createFieldTimeLookup(coordinates, fieldmodule.createFieldConstant(0))
+            F = fieldmodule.createFieldGradient(coordinates, reference_coordinates)
+            F_transpose = fieldmodule.createFieldTranspose(3, F)
+            identity3 = fieldmodule.createFieldConstant([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+            C = fieldmodule.createFieldMatrixMultiply(3, F_transpose, F)
+            E2 = C - identity3
+            E = E2 * fieldmodule.createFieldConstant(0.5)
+            E.setName("E")
+            E.setManaged(True)
 
-    def calculate_strain(self, points, points_dash):
-        F = np.linalg.solve(points, points_dash)
-        C = F.T @ F
-        E = .5 * (C - np.identity(3))
-        return E
+            fibre_axes = fieldmodule.createFieldFibreAxes(fieldmodule.createFieldConstant(0), reference_coordinates)
+            E1 = fieldmodule.createFieldMatrixMultiply(3, fibre_axes, E)
+            fat = fieldmodule.createFieldTranspose(3, fibre_axes)
+            E_fibre = fieldmodule.createFieldMatrixMultiply(3, E1, fat)
+            principal_strains = fieldmodule.createFieldEigenvalues(E_fibre)
+            principal_strains.setName("principal_strains")
+            principal_strains.setManaged(True)
+            principal_strain_vectors = fieldmodule.createFieldEigenvectors(principal_strains)
+            deformed_principal_strain_vectors = fieldmodule.createFieldMatrixMultiply(3, principal_strain_vectors,
+                                                                                      F_transpose)
+            # should be easier than this to get several components:
+            deformed_principal_strain_vector = [ \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([1.0, 0.0, 0.0]),
+                                                      deformed_principal_strain_vectors), \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([0.0, 1.0, 0.0]),
+                                                      deformed_principal_strain_vectors), \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([0.0, 0.0, 1.0]),
+                                                      deformed_principal_strain_vectors)]
+            for i in range(3):
+                direction = fieldmodule.createFieldNormalise(deformed_principal_strain_vector[i])
+                direction.setName("principal_strain{:}_direction".format(i + 1))
+                direction.setManaged(True)
+                principal_strain_direction.append(direction)
+                strain = fieldmodule.createFieldComponent(principal_strains, i + 1)
+                strain.setName("principal_strain{:}".format(i + 1))
+                strain.setManaged(True)
+                principal_strain.append(strain)
+            # Calculate the deformed fibre axes
+            # fibre_axes = fieldmodule.createFieldFibreAxes(fibres, rc_reference_coordinates)
+            # fibre_axes.setName("fibre_axes")
+            # fibre_axes.setManaged(True)
+            # deformed_fibre_axes = fieldmodule.createFieldMatrixMultiply(3, fibre_axes, F_transpose)
+            # deformed_fibre_axes.setName("deformed_fibre_axes")
+            # deformed_fibre_axes.setManaged(True)
+            fieldmodule.endChange()
+        spectrummodule = scene.getSpectrummodule()
+        strainSpectrum = spectrummodule.findSpectrumByName("strain")
+        if not strainSpectrum.isValid():
+            spectrummodule.beginChange()
+            strainSpectrum = spectrummodule.createSpectrum()
+            strainSpectrum.setName("strain")
+            strainSpectrum.setManaged(True)
+            # red when negative
+            spectrumComponent1 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent1.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_RED)
+            spectrumComponent1.setRangeMinimum(-1.0)
+            spectrumComponent1.setRangeMaximum(0.0)
+            spectrumComponent1.setExtendAbove(False)
+            spectrumComponent1.setColourMinimum(1.0)
+            spectrumComponent1.setColourMaximum(1.0)
+            # blue when positive
+            spectrumComponent2 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent2.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_BLUE)
+            spectrumComponent2.setRangeMinimum(0.0)
+            spectrumComponent2.setRangeMaximum(1.0)
+            spectrumComponent2.setExtendBelow(False)
+            spectrumComponent2.setColourMinimum(1.0)
+            spectrumComponent2.setColourMaximum(1.0)
+            # this adds some green to the blue above so not too dark
+            spectrumComponent3 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent3.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_GREEN)
+            spectrumComponent3.setRangeMinimum(0.0)
+            spectrumComponent3.setRangeMaximum(1.0)
+            spectrumComponent3.setExtendBelow(False)
+            spectrumComponent3.setColourMinimum(0.5)
+            spectrumComponent3.setColourMaximum(0.5)
+            spectrummodule.endChange()
+        # visualise the strain vectors with mirrored glyphs
+        for i in range(3):
+            points = scene.createGraphicsPoints()
+            points.setFieldDomainType(Field.DOMAIN_TYPE_MESH3D)
+            points.setCoordinateField(coordinates)
+            points.setDataField(principal_strain[i])
+            points.setSpectrum(strainSpectrum)
+            attr = points.getGraphicspointattributes()
+            attr.setGlyphShapeType(Glyph.SHAPE_TYPE_CONE)
+            attr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
+            attr.setBaseSize([1.0, 1.0, 1.0])
+            attr.setOrientationScaleField(principal_strain_direction[i])
+            attr.setSignedScaleField(principal_strain[i])
+            attr.setScaleFactors([2.0, 0.0, 0.0])
+        scene.endChange()
 
-    def calculate_strain_in_element_xi(self, element, timestep):
 
-        nodes = self._time_based_node_description
+    def set_strain_reference_frame(self, frame_index):
+        self._frame_index = frame_index
 
-        # xl and yl are our un adjusted element directions. We will use these create a local 3D coordinates for the element
 
-        # xl = point 2 of our element - point 1
-        xl = np.array( nodes[str(element[1])][timestep] ) - np.array( nodes[str(element[0])][timestep] )
-        yl = np.array( nodes[str(element[0])][timestep] ) - np.array( nodes[str(element[2])][timestep] )
-
+    def old_strain(self):
         xi = xl / np.linalg.norm(xl)
         norm = np.cross(yl, xl)
         zi = norm / np.linalg.norm(norm)
@@ -285,42 +426,20 @@ class StrainMesh(MeshAlignmentModel):
         # Transormation Matrix TM will be used to convert between coordinate systems
         # https://stackoverflow.com/questions/19621069/3d-rotation-matrix-rotate-to-another-reference-system
         TM = TT
-        # for i in range (0,3):
-        #     for j in range(0,3):
-        #         TM[i][j] = math.cos(angle_between_vectors(np.eye(3)[:,i],TT[:,j]))
-
-        # E = self.calculate_strains_on_element(element, timestep)
-
-        points = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep], nodes[str(element[3])][timestep]]
-        points_dash = [nodes[str(element[1])][timestep + 1], nodes[str(element[2])][timestep + 1],
-                       nodes[str(element[3])][timestep + 1]]
-
-        F = np.linalg.solve(points, points_dash)
-        C = F.T @ F
-        E = .5 * (C - np.identity(3))
 
         Exi = TM @ E @ TM.T
-        e_vals = [0,0,0]
+        e_vals = [0, 0, 0]
         e_vals[0:2], e_vecsxi = np.linalg.eig(Exi)
         e_vecs = np.eye(3, 3)
-        e_vecs[:, 0] = TM.T @ e_vecsxi[:,0]
-        e_vecs[:, 1] = TM.T @ e_vecsxi[:,1]
-        e_vecs[:, 2] = [0,0,0]
-
-        return np.array(e_vals), e_vecs.T
-
-
-    def set_strain_reference_frame(self, frame_index):
-        self._frame_index = frame_index
-
-
-
+        e_vecs[:, 0] = TM.T @ e_vecsxi[:, 0]
+        e_vecs[:, 1] = TM.T @ e_vecsxi[:, 1]
+        e_vecs[:, 2] = [0, 0, 0]
 
 
     def drawMesh(self):
-
-        scene = self._region.getScene()
+        scene = self._scene
         fm = self._region.getFieldmodule()
+        scene.beginChange()
 
         coordinates = self._coordinates
         coordinates = coordinates.castFiniteElement()
@@ -354,14 +473,162 @@ class StrainMesh(MeshAlignmentModel):
 
         surfaces = scene.createGraphicsSurfaces()
         surfaces.setCoordinateField(coordinates)
+        # surfaces.setRenderPolygonMode(Graphics.RENDER_POLYGON_MODE_WIREFRAME)
         surfaces.setMaterial(materialModule.findMaterialByName('trans_blue'))
+        surfaces.setExterior(True)
         surfaces.setVisibilityFlag(True)
-
         # colour = fm.findFieldByName('colour2')
         # colour = colour.castFiniteElement()
 
         # Set attributes for our mesh
         scene.endChange()
+
+    def loadModel(self, region):
+        '''
+        Read time-varying deforming heart model.
+        Define strains fields and make some graphics to visualise them.
+        '''
+        sir = region.createStreaminformationRegion()
+        path = "C:\\Users\jkho021\Downloads\Sound Cloud\examples\\a\deforming_heart\cmiss_input\\"
+        sir.createStreamresourceFile(path + "reference_heart.exnode")
+        sir.createStreamresourceFile(path + "reference_heart.exelem")
+        for i in range(51):
+            filename = 'heart{:0>4}.exnode'.format(i)
+            fr = sir.createStreamresourceFile(path+filename)
+            sir.setResourceAttributeReal(fr, StreaminformationRegion.ATTRIBUTE_TIME, i / 50.0)
+        sir.createStreamresourceFile(path+"heart.exelem")
+        result = region.read(sir)
+        if result != ZINC_OK:
+            print("failed to read")
+            return False
+        scene = region.getScene()
+        timekeepermodule = scene.getTimekeepermodule()
+        timekeeper = timekeepermodule.getDefaultTimekeeper()
+        timekeeper.setMinimumTime(0.0)
+        timekeeper.setMaximumTime(1.0)
+        timekeeper.setTime(0.0)
+
+        scene.beginChange()
+        scene.removeAllGraphics()
+        fieldmodule = region.getFieldmodule()
+
+        # Where are Coordinaets and reference coordinates coming from?
+        coordinates = fieldmodule.findFieldByName("coordinates")
+        reference_coordinates = fieldmodule.findFieldByName("reference_coordinates")
+
+        # Where is fibre coming from?
+        fibres = fieldmodule.findFieldByName("fibres")
+
+        lines = scene.createGraphicsLines()
+        lines.setCoordinateField(coordinates)
+        surfaces = scene.createGraphicsSurfaces()
+        surfaces.setName("surfaces")
+        surfaces.setCoordinateField(coordinates)
+        surfaces.setExterior(True)
+        surfaces.setElementFaceType(Element.FACE_TYPE_XI3_0)
+
+        principal_strain_direction = []
+        principal_strain = []
+        E = fieldmodule.findFieldByName("E")
+        if E.isValid():
+            for i in range(3):
+                principal_strain.append(fieldmodule.findFieldByName("principal_strain{:}".format(i + 1)))
+                principal_strain_direction.append(
+                    fieldmodule.findFieldByName("principal_strain{:}_direction".format(i + 1)))
+        else:
+            fieldmodule.beginChange()
+            rc_reference_coordinates = fieldmodule.createFieldCoordinateTransformation(reference_coordinates)
+            rc_coordinates = fieldmodule.createFieldCoordinateTransformation(coordinates)
+            F = fieldmodule.createFieldGradient(rc_coordinates, rc_reference_coordinates)
+            F_transpose = fieldmodule.createFieldTranspose(3, F)
+            identity3 = fieldmodule.createFieldConstant([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+            C = fieldmodule.createFieldMatrixMultiply(3, F_transpose, F)
+            E2 = C - identity3
+            E = E2 * fieldmodule.createFieldConstant(0.5)
+            E.setName("E")
+            E.setManaged(True)
+            principal_strains = fieldmodule.createFieldEigenvalues(E)
+            principal_strains.setName("principal_strains")
+            principal_strains.setManaged(True)
+            principal_strain_vectors = fieldmodule.createFieldEigenvectors(principal_strains)
+            deformed_principal_strain_vectors = fieldmodule.createFieldMatrixMultiply(3, principal_strain_vectors,
+                                                                                      F_transpose)
+            # should be easier than this to get several components:
+            deformed_principal_strain_vector = [ \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([1.0, 0.0, 0.0]),
+                                                      deformed_principal_strain_vectors), \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([0.0, 1.0, 0.0]),
+                                                      deformed_principal_strain_vectors), \
+                fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([0.0, 0.0, 1.0]),
+                                                      deformed_principal_strain_vectors)]
+            for i in range(3):
+                direction = fieldmodule.createFieldNormalise(deformed_principal_strain_vector[i])
+                direction.setName("principal_strain{:}_direction".format(i + 1))
+                direction.setManaged(True)
+                principal_strain_direction.append(direction)
+                strain = fieldmodule.createFieldComponent(principal_strains, i + 1)
+                strain.setName("principal_strain{:}".format(i + 1))
+                strain.setManaged(True)
+                principal_strain.append(strain)
+            # Calculate the deformed fibre axes
+            fibre_axes = fieldmodule.createFieldFibreAxes(fibres, rc_reference_coordinates)
+            fibre_axes.setName("fibre_axes")
+            fibre_axes.setManaged(True)
+            deformed_fibre_axes = fieldmodule.createFieldMatrixMultiply(3, fibre_axes, F_transpose)
+            deformed_fibre_axes.setName("deformed_fibre_axes")
+            deformed_fibre_axes.setManaged(True)
+            fieldmodule.endChange()
+
+        spectrummodule = scene.getSpectrummodule()
+        strainSpectrum = spectrummodule.findSpectrumByName("strain")
+        if not strainSpectrum.isValid():
+            spectrummodule.beginChange()
+            strainSpectrum = spectrummodule.createSpectrum()
+            strainSpectrum.setName("strain")
+            strainSpectrum.setManaged(True)
+            # red when negative
+            spectrumComponent1 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent1.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_RED)
+            spectrumComponent1.setRangeMinimum(-1.0)
+            spectrumComponent1.setRangeMaximum(0.0)
+            spectrumComponent1.setExtendAbove(False)
+            spectrumComponent1.setColourMinimum(1.0)
+            spectrumComponent1.setColourMaximum(1.0)
+            # blue when positive
+            spectrumComponent2 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent2.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_BLUE)
+            spectrumComponent2.setRangeMinimum(0.0)
+            spectrumComponent2.setRangeMaximum(1.0)
+            spectrumComponent2.setExtendBelow(False)
+            spectrumComponent2.setColourMinimum(1.0)
+            spectrumComponent2.setColourMaximum(1.0)
+            # this adds some green to the blue above so not too dark
+            spectrumComponent3 = strainSpectrum.createSpectrumcomponent()
+            spectrumComponent3.setColourMappingType(Spectrumcomponent.COLOUR_MAPPING_TYPE_GREEN)
+            spectrumComponent3.setRangeMinimum(0.0)
+            spectrumComponent3.setRangeMaximum(1.0)
+            spectrumComponent3.setExtendBelow(False)
+            spectrumComponent3.setColourMinimum(0.5)
+            spectrumComponent3.setColourMaximum(0.5)
+            spectrummodule.endChange()
+
+        # visualise the strain vectors with mirrored glyphs
+        for i in range(3):
+            points = scene.createGraphicsPoints()
+            points.setFieldDomainType(Field.DOMAIN_TYPE_MESH3D)
+            points.setCoordinateField(coordinates)
+            points.setDataField(principal_strain[i])
+            points.setSpectrum(strainSpectrum)
+            attr = points.getGraphicspointattributes()
+            attr.setGlyphShapeType(Glyph.SHAPE_TYPE_CONE)
+            attr.setGlyphRepeatMode(Glyph.REPEAT_MODE_MIRROR)
+            attr.setBaseSize([0.0, 1.0, 1.0])
+            attr.setOrientationScaleField(principal_strain_direction[i])
+            attr.setSignedScaleField(principal_strain[i])
+            attr.setScaleFactors([20.0, 0.0, 0.0])
+
+        scene.endChange()
+        return True
 
 def vector_norm(data, axis=None, out=None):
     data = np.array(data, dtype=np.float64, copy=True)
@@ -384,4 +651,4 @@ def angle_between_vectors(v0, v1, directed=True, axis=0):
     dot = np.sum(v0 * v1, axis=axis)
     dot /= np.linalg.norm(v0, axis=axis) * vector_norm(v1, axis=axis)
     dot = np.clip(dot, -1.0, 1.0)
-    return np.arccos(dot if directed else numpy.fabs(dot))
+    return np.arccos(dot if directed else np.fabs(dot))
