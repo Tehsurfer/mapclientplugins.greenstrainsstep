@@ -1,0 +1,4 @@
+blackfynn
+pyqtgraph
+natsort
+opencv-python

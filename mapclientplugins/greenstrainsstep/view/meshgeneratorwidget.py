@@ -42,7 +42,7 @@ class MeshGeneratorWidget(QtGui.QWidget):
         self._ui.sceneviewer_widget.setModel(self._model)
         self._ui.sceneviewer_widget.initializeGL()
         self._makeConnections()
-
+        self._renderECGMesh()
         self._ui.sceneviewer_widget.grid = []
 
     def _graphicsInitialized(self):
