@@ -101,7 +101,7 @@ class MeshGeneratorWidget(QtGui.QWidget):
         self._ui.timeLoop_checkBox.clicked.connect(self._timeLoopClicked)
         self._ui.strain_reference_button.clicked.connect(self._set_strain_reference)
         self._ui.viewVideo_button.clicked.connect(self._playVideo)
-        self._ui.view_mesh_button.clicked.connect(self._renderECGMesh)
+        self._ui.view_mesh_button.clicked.connect(self._displayStrains)
 
     def _createFMAItem(self, parent, text, fma_id):
         item = QtGui.QTreeWidgetItem(parent)
@@ -148,6 +148,11 @@ class MeshGeneratorWidget(QtGui.QWidget):
         self._pm.generate_mesh()
         self._pm.drawMesh()
         self._ui.sceneviewer_widget.setModel(self._pm)
+
+    def _displayStrains(self):
+        current_frame = int(self._model._current_time * 50 / 2)
+        if self._pm is not None:
+            self._pm.display_strain_at(current_frame)
 
     def _updateFrameIndex(self, value):
         self._ui.frameIndex_spinBox.blockSignals(True)
@@ -211,6 +216,7 @@ class MeshGeneratorWidget(QtGui.QWidget):
             self._ui.sceneviewer_widget.viewAll()
 
     def keyPressEvent(self, event):
+        self._original_mousePressEvent = mousePressEvent
         if event.modifiers() & QtCore.Qt.CTRL and QtGui.QApplication.mouseButtons() == QtCore.Qt.NoButton:
             self._marker_mode_active = True
 

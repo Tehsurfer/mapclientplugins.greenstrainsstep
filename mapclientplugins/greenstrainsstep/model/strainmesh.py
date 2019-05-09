@@ -15,15 +15,17 @@ from mapclientplugins.greenstrainsstep.model.meshalignmentmodel import MeshAlign
 
 class StrainMesh(MeshAlignmentModel):
     """
-    BlackfynnMesh is the central point for generating the model for our mesh and drawing it
+    StrainMesh is the central class used for generating the model and calculating strains on the model
     """
 
     def __init__(self, region, time_based_node_description):
         super(StrainMesh, self).__init__()
         self._mesh_group = []
+        self._strain_graphics_point_attr = []
         self._field_element_group = None
         self._coordinates = None
-
+        self._frame_index = 0
+        self._strains_created = False
         ecg_region = region.findChildByName('strain_mesh')
         if ecg_region.isValid():
             region.removeChild(ecg_region)
@@ -106,7 +108,6 @@ class StrainMesh(MeshAlignmentModel):
         node_template.setTimesequence(coordinates, zinc_node_time_sequence)
 
         first_node_number = 0
-
         # create nodes
         cache = field_module.createFieldcache()
         node_identifier = first_node_number
@@ -159,53 +160,25 @@ class StrainMesh(MeshAlignmentModel):
         self._coordinates = coordinates
 
         field_module.endChange()
-        self._strain_graphics_point_attr = []
-        for i, mg in enumerate(mesh_group_list):
+
+    def display_strain_at(self, time):
+
+        for i, mg in enumerate(self._mesh_group_list):
             # strain = self.calculate_strain_in_element_xi(element_node_list[i], 0)
             # # scaled_eigvectors = self.get_sized_eigvectors(strain)
             # e_vals, e_vecs = np.linalg.eig(strain)
 
-            e_vals, e_vecs = self.calculate_strain_in_element_xi(element_node_list[i], 0)
+            e_vals, e_vecs = self.calculate_strain_in_element_xi(self._element_node_list[i], self._frame_index, time)
             if np.iscomplex(e_vecs).any():
                 x = 0
-            self.create_display_strains(e_vecs, e_vals, mg)
+            if self._strains_created is False:
+                self.create_display_strains(e_vecs, e_vals, mg)
+            else:
+                self.update_display_strains(e_vecs, e_vals, i)
+        self._strains_created = True
+        print('Finished updating strains')
 
-    def display_strains_at_given_time(self, time_step):
-        fm = self._region.getFieldmodule()
-        for i, mg in enumerate(self._mesh_group_list):
-            strain = self.calculate_strains_on_element(self._element_node_list[i], time_step)
-            eigvectors, eigenvalues = self.get_sized_eigvectors(strain)
-            ss = fm.createFieldConstant(np.array(scaled_eigvectors).flatten().tolist())
-            self._strain_graphics_point_attr[i].setOrientationScaleField(ss)
 
-    def display_strains_at_given_time_to_reference(self, time_step):
-        fm = self._region.getFieldmodule()
-        for i, mg in enumerate(self._mesh_group_list):
-            strain = self.calculate_strains_from_element_reference(self._element_node_list[i], time_step)
-            scaled_eigvectors = self.get_sized_eigvectors(strain)
-            ss = fm.createFieldConstant(np.array(scaled_eigvectors).flatten().tolist())
-            self._strain_graphics_point_attr[i].setOrientationScaleField(ss)
-
-    def calculate_strains_on_element(self, element, timestep):
-
-        nodes = self._time_based_node_description
-
-        # points is the location of a line at timestep t. points_dash is the location of the line at timestep t+1
-        points = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep],nodes[str(element[3])][timestep]]
-        points_dash = [nodes[str(element[1])][timestep+1], nodes[str(element[2])][timestep+1],nodes[str(element[3])][timestep+1]]
-        strain = self.calculate_strain(points, points_dash)
-
-        return strain
-    def calculate_strains_from_element_reference(self, element, timestep):
-
-        nodes = self._time_based_node_description
-
-        # points is the location of a line at timestep t. points_dash is the location of the line at timestep t+1
-        points = [nodes[str(element[1])][self._frame_index], nodes[str(element[2])][self._frame_index],nodes[str(element[3])][self._frame_index]]
-        points_dash = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep],nodes[str(element[3])][timestep]]
-        strain = self.calculate_strain(points, points_dash)
-
-        return strain
     def get_sized_eigvectors(self, E):
 
         e_vals, e_vecs = np.linalg.eig(E)
@@ -221,6 +194,7 @@ class StrainMesh(MeshAlignmentModel):
         materialModule = scene.getMaterialmodule()
         coordinates = self._coordinates
         coordinates = coordinates.castFiniteElement()
+        pointattrT = []
         for i in range(2):
 
             strain_graphics = scene.createGraphicsPoints()
@@ -236,12 +210,24 @@ class StrainMesh(MeshAlignmentModel):
             pointattr.setOrientationScaleField(ss)
             pointattr.setSignedScaleField(fm.createFieldConstant(strain_values[i]))
             strain_graphics.setMaterial(materialModule.findMaterialByName('red'))
-            pointattr.setScaleFactors([.5, 0.0, 0.0])
+            pointattr.setScaleFactors([.1, 0.0, 0.0])
+            pointattrT.append(pointattr)
+        self._strain_graphics_point_attr.append(pointattrT)
         # strain_graphics.setName('displayStrains')
 
         # Create a point attribute arrray so that we can modify the size later easily
-        self._strain_graphics_point_attr.append(pointattr)
+
         fm.endChange()
+
+    def update_display_strains(self, strain_vectors, strain_values, index):
+        scene = self._region.getScene()
+        fm = self._region.getFieldmodule()
+        fm.beginChange()
+        for i in range(2):
+            ss = fm.createFieldConstant(strain_vectors[i].tolist())
+            point_attr = self._strain_graphics_point_attr[index][i]
+            point_attr.setOrientationScaleField(ss)
+            point_attr.setSignedScaleField(fm.createFieldConstant(strain_values[i]))
 
     def convert_dict_to_array(self, dictionary):
         array = []
@@ -250,31 +236,21 @@ class StrainMesh(MeshAlignmentModel):
                 array.append(dictionary[key])
         return array
 
-    def create_strain_arrays(self, ecg_dict):
-        strains = []
-        for i, points_over_time in enumerate(ecg_dict[:-1]):
-            strains.append([])
-            for j, point in enumerate(points_over_time[:-1]):
-                points = [ecg_dict[i][j], ecg_dict[i + 1][j]]
-                points_dash = [ecg_dict[i][j + 1], ecg_dict[i + 1][j + 1]]
-                strains[i].append(self.calculate_strain(points, points_dash))
-        return strains
-
     def calculate_strain(self, points, points_dash):
         F = np.linalg.solve(points, points_dash)
         C = F.T @ F
         E = .5 * (C - np.identity(3))
         return E
 
-    def calculate_strain_in_element_xi(self, element, timestep):
+    def calculate_strain_in_element_xi(self, element, ref_t, t):
 
         nodes = self._time_based_node_description
 
         # xl and yl are our un adjusted element directions. We will use these create a local 3D coordinates for the element
 
         # xl = point 2 of our element - point 1
-        xl = np.array( nodes[str(element[1])][timestep] ) - np.array( nodes[str(element[0])][timestep] )
-        yl = np.array( nodes[str(element[0])][timestep] ) - np.array( nodes[str(element[2])][timestep] )
+        xl = np.array( nodes[str(element[1])][ref_t] ) - np.array( nodes[str(element[0])][ref_t] )
+        yl = np.array( nodes[str(element[0])][ref_t] ) - np.array( nodes[str(element[2])][ref_t] )
 
         xi = xl / np.linalg.norm(xl)
         norm = np.cross(yl, xl)
@@ -285,21 +261,19 @@ class StrainMesh(MeshAlignmentModel):
         # Transormation Matrix TM will be used to convert between coordinate systems
         # https://stackoverflow.com/questions/19621069/3d-rotation-matrix-rotate-to-another-reference-system
         TM = TT
-        # for i in range (0,3):
-        #     for j in range(0,3):
-        #         TM[i][j] = math.cos(angle_between_vectors(np.eye(3)[:,i],TT[:,j]))
 
-        # E = self.calculate_strains_on_element(element, timestep)
+        points = [nodes[str(element[1])][ref_t], nodes[str(element[2])][ref_t], nodes[str(element[3])][ref_t]]
+        points_dash = [nodes[str(element[1])][t], nodes[str(element[2])][t], nodes[str(element[3])][t]]
 
-        points = [nodes[str(element[1])][timestep], nodes[str(element[2])][timestep], nodes[str(element[3])][timestep]]
-        points_dash = [nodes[str(element[1])][timestep + 1], nodes[str(element[2])][timestep + 1],
-                       nodes[str(element[3])][timestep + 1]]
-
+        # Calculate strain using E = .5(Ftrnsp . F - I ) https://www.continuummechanics.org/greenstrain.html
         F = np.linalg.solve(points, points_dash)
         C = F.T @ F
         E = .5 * (C - np.identity(3))
 
+        # Transform stain matrix to our local coordinates
         Exi = TM @ E @ TM.T
+
+        # Calculate strain eigenvalues and eigenvectors in the local xi coordinates
         e_vals = [0,0,0]
         e_vals[0:2], e_vecsxi = np.linalg.eig(Exi)
         e_vecs = np.eye(3, 3)
@@ -312,10 +286,6 @@ class StrainMesh(MeshAlignmentModel):
 
     def set_strain_reference_frame(self, frame_index):
         self._frame_index = frame_index
-
-
-
-
 
     def drawMesh(self):
 
@@ -362,26 +332,3 @@ class StrainMesh(MeshAlignmentModel):
 
         # Set attributes for our mesh
         scene.endChange()
-
-def vector_norm(data, axis=None, out=None):
-    data = np.array(data, dtype=np.float64, copy=True)
-    if out is None:
-        if data.ndim == 1:
-            return math.sqrt(np.dot(data, data))
-        data *= data
-        out = np.atleast_1d(np.sum(data, axis=axis))
-        np.sqrt(out, out)
-        return out
-    else:
-        data *= data
-        np.sum(data, axis=axis, out=out)
-        np.sqrt(out, out)
-
-def angle_between_vectors(v0, v1, directed=True, axis=0):
-
-    v0 = np.array(v0, dtype=np.float64, copy=False)
-    v1 = np.array(v1, dtype=np.float64, copy=False)
-    dot = np.sum(v0 * v1, axis=axis)
-    dot /= np.linalg.norm(v0, axis=axis) * vector_norm(v1, axis=axis)
-    dot = np.clip(dot, -1.0, 1.0)
-    return np.arccos(dot if directed else numpy.fabs(dot))
