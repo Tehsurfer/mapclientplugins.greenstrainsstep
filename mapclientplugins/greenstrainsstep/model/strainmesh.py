@@ -308,7 +308,7 @@ class StrainMesh(MeshAlignmentModel):
         coordinates = self._coordinates
         coordinates = coordinates.castFiniteElement()
         scene.beginChange()
-        E = fieldmodule.findFieldByName("E")
+        E = fieldmodule.findFieldByName("E") # Will not be valid on first run
         principal_strain_direction = []
         principal_strain = []
         if E.isValid():
@@ -328,17 +328,22 @@ class StrainMesh(MeshAlignmentModel):
             E.setName("E")
             E.setManaged(True)
 
-            fibre_axes = fieldmodule.createFieldFibreAxes(fieldmodule.createFieldConstant(0), reference_coordinates)
+            # -- transform E into fibre coordinates --
+            fibre_axes = fieldmodule.createFieldFibreAxes(fieldmodule.createFieldConstant(0), reference_coordinates) # why do we pass in a 0?
             E1 = fieldmodule.createFieldMatrixMultiply(3, fibre_axes, E)
             fat = fieldmodule.createFieldTranspose(3, fibre_axes)
             E_fibre = fieldmodule.createFieldMatrixMultiply(3, E1, fat)
+
+            # -- find principle strains in fibre coordinates --
             principal_strains = fieldmodule.createFieldEigenvalues(E_fibre)
             principal_strains.setName("principal_strains")
             principal_strains.setManaged(True)
             principal_strain_vectors = fieldmodule.createFieldEigenvectors(principal_strains)
+
+            # -- converting back to global coordinates? --
             deformed_principal_strain_vectors = fieldmodule.createFieldMatrixMultiply(3, principal_strain_vectors,
                                                                                       F_transpose)
-            # should be easier than this to get several components:
+            # -- splitting the matrix into components --
             deformed_principal_strain_vector = [ \
                 fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([1.0, 0.0, 0.0]),
                                                       deformed_principal_strain_vectors), \
@@ -346,6 +351,8 @@ class StrainMesh(MeshAlignmentModel):
                                                       deformed_principal_strain_vectors), \
                 fieldmodule.createFieldMatrixMultiply(1, fieldmodule.createFieldConstant([0.0, 0.0, 1.0]),
                                                       deformed_principal_strain_vectors)]
+
+            # -- get principle strain directions --
             for i in range(3):
                 direction = fieldmodule.createFieldNormalise(deformed_principal_strain_vector[i])
                 direction.setName("principal_strain{:}_direction".format(i + 1))
@@ -629,26 +636,3 @@ class StrainMesh(MeshAlignmentModel):
 
         scene.endChange()
         return True
-
-def vector_norm(data, axis=None, out=None):
-    data = np.array(data, dtype=np.float64, copy=True)
-    if out is None:
-        if data.ndim == 1:
-            return math.sqrt(np.dot(data, data))
-        data *= data
-        out = np.atleast_1d(np.sum(data, axis=axis))
-        np.sqrt(out, out)
-        return out
-    else:
-        data *= data
-        np.sum(data, axis=axis, out=out)
-        np.sqrt(out, out)
-
-def angle_between_vectors(v0, v1, directed=True, axis=0):
-
-    v0 = np.array(v0, dtype=np.float64, copy=False)
-    v1 = np.array(v1, dtype=np.float64, copy=False)
-    dot = np.sum(v0 * v1, axis=axis)
-    dot /= np.linalg.norm(v0, axis=axis) * vector_norm(v1, axis=axis)
-    dot = np.clip(dot, -1.0, 1.0)
-    return np.arccos(dot if directed else np.fabs(dot))
